@@ -1,22 +1,3 @@
-# tap-redshift
-# Copyright 2018 data.world, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the
-# License.
-#
-# You may obtain a copy of the License at
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied. See the License for the specific language governing
-# permissions and limitations under the License.
-#
-# This product includes software developed at
-# data.world, Inc.(http://data.world/).
-
 import copy
 import datetime
 import ssl
@@ -70,41 +51,35 @@ CONFIG = {}
 def discover_catalog(conn, db_schema):
     '''Returns a Catalog describing the structure of the database.'''
 
-    table_spec = select_all(
-        conn,
-        """
-        SELECT table_name, table_type
-        FROM INFORMATION_SCHEMA.Tables
-        WHERE table_schema = '{}'
-        """.format(db_schema))
+    query_params = (db_schema,)
 
-    column_specs = select_all(
-        conn,
-        """
-        SELECT c.table_name, c.ordinal_position, c.column_name, c.udt_name,
-        c.is_nullable
-        FROM INFORMATION_SCHEMA.Tables t
-        JOIN INFORMATION_SCHEMA.Columns c ON c.table_name = t.table_name
-        WHERE t.table_schema = '{}'
-        ORDER BY c.table_name, c.ordinal_position
-        """.format(db_schema))
+    table_query = """SELECT table_name, table_type
+                       FROM INFORMATION_SCHEMA.Tables
+                      WHERE table_schema = %s"""
 
-    pk_specs = select_all(
-        conn,
-        """
-        SELECT kc.table_name, kc.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kc
-            ON kc.table_name = tc.table_name AND
-               kc.table_schema = tc.table_schema AND
-               kc.constraint_name = tc.constraint_name
-        WHERE tc.constraint_type = 'PRIMARY KEY' AND
-              tc.table_schema = '{}'
-        ORDER BY
-          tc.table_schema,
-          tc.table_name,
-          kc.ordinal_position
-        """.format(db_schema))
+    table_specs = select_all(conn, table_query, query_params)
+
+    column_query = """SELECT c.table_name, c.ordinal_position, c.column_name,
+                             c.udt_name, c.is_nullable
+                        FROM INFORMATION_SCHEMA.Tables t
+                        JOIN INFORMATION_SCHEMA.Columns c
+                          ON c.table_name = t.table_name
+                       WHERE t.table_schema = %s
+                    ORDER BY c.table_name, c.ordinal_position"""
+
+    column_specs = select_all(conn, column_query, query_params)
+
+    pk_query = """SELECT kc.table_name, kc.column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kc
+                      ON kc.table_name = tc.table_name
+                     AND kc.table_schema = tc.table_schema
+                     AND kc.constraint_name = tc.constraint_name
+                   WHERE tc.constraint_type = 'PRIMARY KEY'
+                     AND tc.table_schema = %s
+                ORDER BY tc.table_schema, tc.table_name, kc.ordinal_position"""
+
+    pk_specs = select_all(conn, pk_query, query_params)
 
     entries = []
     table_columns = [{'name': k, 'columns': [
@@ -259,9 +234,9 @@ def open_connection(config):
     return connection
 
 
-def select_all(conn, query):
+def select_all(conn, query, params):
     cur = conn.cursor()
-    cur.execute(query)
+    cur.execute(query, params)
     column_specs = cur.fetchall()
     cur.close()
     return column_specs
@@ -499,7 +474,8 @@ def build_state(raw_state, catalog):
     return state
 
 
-def main_impl():
+@utils.handle_top_exception(LOGGER)
+def main():
     args = utils.parse_args(REQUIRED_CONFIG_KEYS)
     CONFIG.update(args.config)
     connection = open_connection(args.config)
@@ -515,11 +491,6 @@ def main_impl():
         do_sync(connection, db_schema, catalog, state)
     else:
         LOGGER.info("No properties were selected")
-
-
-@utils.handle_top_exception(LOGGER)
-def main():
-    main_impl()
 
 
 if __name__ == '__main__':

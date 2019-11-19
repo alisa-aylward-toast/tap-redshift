@@ -245,6 +245,7 @@ def open_connection(config):
     psql_creds = {
         "dbname": config["dbname"],
         "user": config["user"],
+        "port": config["port"],
         "password": config["password"],
         "host": config["host"],
     }
